@@ -14,44 +14,34 @@
 #include "../libyara/include/yara/exec.h"
 
 
-typedef struct YR_ARENA_FILE_HEADER YR_ARENA_FILE_HEADER;
-typedef struct YR_ARENA_FILE_BUFFER YR_ARENA_FILE_BUFFER;
-
-#pragma pack(push)
-#pragma pack(1)
-
-struct YR_ARENA_FILE_HEADER
-{
-  uint8_t magic[4];
-  uint8_t version;
-  uint8_t num_buffers;
-};
-
-struct YR_ARENA_FILE_BUFFER
-{
-  uint64_t offset;
-  uint32_t size;
-};
-
-#pragma pack(pop)
-
 SYMBOL* symbol_table = NULL;
 int num_symbols = 0;
+int show_disassembly = 0;
+uintptr_t mapped_base = 0;
+size_t mapped_size = 0;
 
-void add_symbol(uint32_t buffer_id, uint32_t offset, char* name)
+void add_symbol(uintptr_t addr, char* name)
 {
+    if (addr == 0 || name == NULL) return;
+    for (int i = 0; i < num_symbols; i++)
+    {
+        if (symbol_table[i].addr == addr) return;
+    }
+
     symbol_table = realloc(symbol_table, sizeof(SYMBOL) * (num_symbols + 1));
-    symbol_table[num_symbols].buffer_id = buffer_id;
-    symbol_table[num_symbols].offset = offset;
+    symbol_table[num_symbols].addr = addr;
     symbol_table[num_symbols].name = strdup(name);
     num_symbols++;
 }
 
-char* find_symbol(uint32_t buffer_id, uint32_t offset)
+char* find_symbol(uintptr_t addr)
 {
+    if (addr < mapped_base || addr >= mapped_base + mapped_size)
+        return NULL;
+
     for (int i = 0; i < num_symbols; i++)
     {
-        if (symbol_table[i].buffer_id == buffer_id && symbol_table[i].offset == offset)
+        if (symbol_table[i].addr == addr)
         {
             return symbol_table[i].name;
         }
@@ -81,7 +71,7 @@ uint8_t* map_file(const char* file_path, size_t* file_size)
 
     *file_size = st.st_size;
 
-    uint8_t* file_mem = mmap(0, *file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    uint8_t* file_mem = mmap(0, *file_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
     if (file_mem == MAP_FAILED)
     {
         perror("mmap");
@@ -115,6 +105,9 @@ int decompile(const char* file_path)
         return 1;
     }
 
+    mapped_base = (uintptr_t)file_mem;
+    mapped_size = file_size;
+
     YR_ARENA_FILE_HEADER* header = (YR_ARENA_FILE_HEADER*) file_mem;
 
     if (memcmp(header->magic, "YARA", 4) != 0)
@@ -133,37 +126,62 @@ int decompile(const char* file_path)
 
     YR_ARENA_FILE_BUFFER* buffers = (YR_ARENA_FILE_BUFFER*) (header + 1);
     
-    YR_ARENA_REF summary_ref;
-    summary_ref.buffer_id = YR_SUMMARY_SECTION;
-    summary_ref.offset = 0;
+    uint64_t last_buffer_end = 0;
+    for (int i = 0; i < header->num_buffers; i++) {
+        if (buffers[i].offset + buffers[i].size > last_buffer_end)
+            last_buffer_end = buffers[i].offset + buffers[i].size;
+    }
+    
+    uint8_t* reloc_ptr = file_mem + last_buffer_end;
+    while (reloc_ptr + sizeof(YR_ARENA_REF) <= file_mem + file_size)
+    {
+        YR_ARENA_REF* reloc_ref = (YR_ARENA_REF*)reloc_ptr;
+        if (reloc_ref->buffer_id >= header->num_buffers) break;
+
+        void* target_ptr = file_mem + buffers[reloc_ref->buffer_id].offset + reloc_ref->offset;
+        YR_ARENA_REF* value_to_patch = (YR_ARENA_REF*)target_ptr;
+        
+        void* final_ptr = resolve_ref(file_mem, buffers, value_to_patch);
+        memcpy(target_ptr, &final_ptr, sizeof(void*));
+        
+        reloc_ptr += sizeof(YR_ARENA_REF);
+    }
+
+    YR_ARENA_REF summary_ref = { .buffer_id = YR_SUMMARY_SECTION, .offset = 0 };
     YR_SUMMARY* summary = (YR_SUMMARY*)resolve_ref(file_mem, buffers, &summary_ref);
 
-    YR_ARENA_REF rules_table_ref;
-    rules_table_ref.buffer_id = YR_RULES_TABLE;
-    rules_table_ref.offset = 0;
+    YR_ARENA_REF rules_table_ref = { .buffer_id = YR_RULES_TABLE, .offset = 0 };
     YR_RULE* rules_table = (YR_RULE*)resolve_ref(file_mem, buffers, &rules_table_ref);
 
-    YR_ARENA_REF strings_table_ref;
-    strings_table_ref.buffer_id = YR_STRINGS_TABLE;
-    strings_table_ref.offset = 0;
+    YR_ARENA_REF strings_table_ref = { .buffer_id = YR_STRINGS_TABLE, .offset = 0 };
     YR_STRING* strings_table = (YR_STRING*)resolve_ref(file_mem, buffers, &strings_table_ref);
 
-    YR_ARENA_REF code_start_ref;
-    code_start_ref.buffer_id = YR_CODE_SECTION;
-    code_start_ref.offset = 0;
+    YR_ARENA_REF code_start_ref = { .buffer_id = YR_CODE_SECTION, .offset = 0 };
     const uint8_t* code_start = (const uint8_t*)resolve_ref(file_mem, buffers, &code_start_ref);
 
-    // Build symbol table
     uint8_t* sz_pool = (uint8_t*)resolve_ref(file_mem, buffers, &(YR_ARENA_REF){.buffer_id=YR_SZ_POOL, .offset=0});
     uint32_t sz_pool_size = buffers[YR_SZ_POOL].size;
+    
+    // Improved sz_pool parsing: identifying SIZED_STRINGs
     uint32_t sz_offset = 0;
-    while(sz_offset < sz_pool_size)
+    while(sz_offset + 8 < sz_pool_size)
     {
-        char* s = (char*)(sz_pool + sz_offset);
-        if (*s != '\0')
+        SIZED_STRING* ss = (SIZED_STRING*)(sz_pool + sz_offset);
+        // Heuristic: length should be reasonable and c_string should be printable
+        if (ss->length > 0 && ss->length < 1024 && ss->c_string[0] != '\0')
         {
-            add_symbol(YR_SZ_POOL, sz_offset, s);
-            sz_offset += strlen(s) + 1;
+            // Add symbol for the SIZED_STRING structure itself
+            add_symbol((uintptr_t)ss, ss->c_string);
+            sz_offset += 8 + ss->length + 1;
+            // Pad to 8-byte alignment if YARA does that? No, usually it's just packed.
+            // But let's check for null padding.
+            while(sz_offset < sz_pool_size && sz_pool[sz_offset] == '\0') sz_offset++;
+        }
+        else if (sz_pool[sz_offset] != '\0')
+        {
+            // Fallback for raw C strings
+            add_symbol((uintptr_t)(sz_pool + sz_offset), (char*)(sz_pool + sz_offset));
+            sz_offset += strlen((char*)(sz_pool + sz_offset)) + 1;
         }
         else
         {
@@ -173,28 +191,27 @@ int decompile(const char* file_path)
 
     for (int i = 0; i < summary->num_strings; i++)
     {
-        YR_STRING* string = &strings_table[i];
-        char* identifier = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&string->identifier);
-        add_symbol(YR_STRINGS_TABLE, i * sizeof(YR_STRING), identifier);
+        YR_STRING* string = (YR_STRING*)((uint8_t*)strings_table + i * sizeof(YR_STRING));
+        if (string->identifier)
+        {
+            add_symbol((uintptr_t)string, (char*)string->identifier);
+        }
     }
 
     for (int i = 0; i < summary->num_rules; i++)
     {
-        YR_RULE* rule = &rules_table[i];
+        YR_RULE* rule = (YR_RULE*)((uint8_t*)rules_table + i * sizeof(YR_RULE));
         if (RULE_IS_NULL(rule)) continue;
-        char* identifier = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->identifier);
-        add_symbol(YR_RULES_TABLE, i * sizeof(YR_RULE), identifier);
+        add_symbol((uintptr_t)rule, (char*)rule->identifier);
     }
 
-    // Scan for imports
     const uint8_t* ip = code_start;
-    while (*ip != OP_HALT)
+    while (ip < code_start + buffers[YR_CODE_SECTION].size && *ip != OP_HALT)
     {
         if (*ip == OP_IMPORT)
         {
-            uint32_t buffer_id = *(uint32_t*)(ip + 1);
-            uint32_t offset = *(uint32_t*)(ip + 5);
-            char* module_name = find_symbol(buffer_id, offset);
+            void* addr = *(void**)(ip + 1);
+            char* module_name = find_symbol((uintptr_t)addr);
             if (module_name)
             {
                 printf("import \"%s\"\n", module_name);
@@ -209,14 +226,13 @@ int decompile(const char* file_path)
 
     for (int i = 0; i < summary->num_rules; i++)
     {
-        YR_RULE* rule = &rules_table[i];
+        YR_RULE* rule = (YR_RULE*)((uint8_t*)rules_table + i * sizeof(YR_RULE));
         if (RULE_IS_NULL(rule))
         {
             continue;
         }
 
-        YR_NAMESPACE* ns = (YR_NAMESPACE*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->ns);
-        char* ns_name = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&ns->name);
+        char* ns_name = rule->ns->name;
 
         if (current_ns_name == NULL || strcmp(current_ns_name, ns_name) != 0)
         {
@@ -227,14 +243,12 @@ int decompile(const char* file_path)
             current_ns_name = ns_name;
         }
 
-        char* identifier = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->identifier);
-        printf("rule %s", identifier);
+        printf("rule %s", rule->identifier);
 
-        char* tags = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->tags);
-        if (tags != NULL && *tags != '\0')
+        if (rule->tags != NULL && *rule->tags != '\0')
         {
             printf(" : ");
-            char* tag = tags;
+            char* tag = (char*)rule->tags;
             while(*tag)
             {
                 printf("%s ", tag);
@@ -243,69 +257,34 @@ int decompile(const char* file_path)
         }
         printf("\n{\n");
 
-        YR_META* metas = (YR_META*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->metas);
-        if (metas != NULL)
+        if (rule->metas != NULL)
         {
             printf("  meta:\n");
-            YR_META* meta = metas;
+            YR_META* meta = rule->metas;
             while(1)
             {
-                char* key = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&meta->identifier);
-                if (meta->type == META_TYPE_STRING)
-                {
-                    char* value = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&meta->string);
-                    printf("    %s = \"%s\"\n", key, value);
-                }
-                else if (meta->type == META_TYPE_INTEGER)
-                {
-                    printf("    %s = %lld\n", key, meta->integer);
-                }
-                else if (meta->type == META_TYPE_BOOLEAN)
-                {
-                    printf("    %s = %s\n", key, meta->integer ? "true" : "false");
-                }
-
-                if (META_IS_LAST_IN_RULE(meta))
-                {
-                    break;
-                }
+                print_meta(meta, file_mem, buffers);
+                if (META_IS_LAST_IN_RULE(meta)) break;
                 meta++;
             }
         }
 
-        YR_STRING* strings = (YR_STRING*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&rule->strings);
-        if (strings != NULL)
+        if (rule->strings != NULL)
         {
             printf("  strings:\n");
-            YR_STRING* string = strings;
+            YR_STRING* string = rule->strings;
             while(1)
             {
-                char* identifier = (char*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&string->identifier);
-                uint8_t* value = (uint8_t*) resolve_ref(file_mem, buffers, (YR_ARENA_REF*)&string->string);
-                
-                if (STRING_IS_HEX(string))
-                {
-                    printf("    %s = { ", identifier);
-                    for (int j = 0; j < string->length; j++)
-                    {
-                        printf("%02X ", value[j]);
-                    }
-                    printf("}\n");
-                }
-                else
-                {
-                    printf("    %s = \"%.*s\"\n", identifier, string->length, value);
-                }
-
-                if (STRING_IS_LAST_IN_RULE(string))
-                {
-                    break;
-                }
+                print_string(string, file_mem, buffers);
+                if (STRING_IS_LAST_IN_RULE(string)) break;
                 string++;
             }
         }
 
         printf("  condition:\n");
+        if (show_disassembly)
+            disassemble(code_start, i);
+        
         decompile_rule_condition(code_start, i);
         printf("}\n");
     }
@@ -318,13 +297,27 @@ int decompile(const char* file_path)
 
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    char* file_path = NULL;
+
+    for (int i = 1; i < argc; i++)
     {
-        fprintf(stderr, "Usage: %s <compiled-rule-file>\n", argv[0]);
+        if (strcmp(argv[i], "--disassemble") == 0)
+        {
+            show_disassembly = 1;
+        }
+        else
+        {
+            file_path = argv[i];
+        }
+    }
+
+    if (file_path == NULL)
+    {
+        fprintf(stderr, "Usage: %s [--disassemble] <compiled-rule-file>\n", argv[0]);
         return 1;
     }
 
-    decompile(argv[1]);
+    decompile(file_path);
 
     return 0;
 }

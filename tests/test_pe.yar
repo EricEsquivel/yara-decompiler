@@ -1,0 +1,8 @@
+
+import "pe"
+
+rule pe_test
+{
+    condition:
+        pe.is_dll() and pe.number_of_sections > 0
+}
