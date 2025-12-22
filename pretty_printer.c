@@ -23,10 +23,8 @@ void print_meta(YR_META* meta, uint8_t* file_mem, YR_ARENA_FILE_BUFFER* buffers)
 void print_string(YR_STRING* string, uint8_t* file_mem, YR_ARENA_FILE_BUFFER* buffers)
 {
     uint8_t* value = string->string;
-    char* identifier = string->identifier;
+    char* identifier = (char*)string->identifier;
     
-    // YARA string identifiers in our symbol table are now raw names (stripped $)
-    // But pretty printer should print the $
     if (identifier[0] == '$')
         printf("    %s = ", identifier);
     else
@@ -43,7 +41,12 @@ void print_string(YR_STRING* string, uint8_t* file_mem, YR_ARENA_FILE_BUFFER* bu
     }
     else if (STRING_IS_REGEXP(string))
     {
-        printf("/%.*s/", string->length, value);
+        // YARA does not store regex source. 
+        // We print a placeholder that is valid YARA syntax.
+        if (string->length > 0)
+            printf("/%.*s/", string->length, value);
+        else
+            printf("/[RE_SOURCE_N_A]/");
     }
     else
     {

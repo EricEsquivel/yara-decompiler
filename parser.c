@@ -24,10 +24,9 @@ void add_symbol(uintptr_t addr, char* name)
 {
     if (addr == 0 || name == NULL) return;
     
-    // Debug: print symbols that look like format strings or module names
-    if (strlen(name) < 5) {
-        // printf("// DEBUG: add_symbol addr=0x%lx name=%s\n", (unsigned long)addr, name);
-    }
+    // Protect YARA keywords from address resolution
+    if (strcmp(name, "any") == 0 || strcmp(name, "all") == 0 || strcmp(name, "them") == 0)
+        return;
 
     for (int i = 0; i < num_symbols; i++)
     {
@@ -168,21 +167,17 @@ int decompile(const char* file_path)
     uint8_t* sz_pool = (uint8_t*)resolve_ref(file_mem, buffers, &(YR_ARENA_REF){.buffer_id=YR_SZ_POOL, .offset=0});
     uint32_t sz_pool_size = buffers[YR_SZ_POOL].size;
     
-    // Comprehensive pool parsing
     for (uint32_t offset = 0; offset < sz_pool_size; offset++)
     {
-        if (sz_pool[offset] != '\0')
+        if (sz_pool[offset] >= 0x20 && sz_pool[offset] <= 0x7E)
         {
             char* s = (char*)(sz_pool + offset);
             add_symbol((uintptr_t)s, s);
             
-            // Check if this looks like the c_string of a SIZED_STRING
-            if (offset >= 8)
-            {
-                SIZED_STRING* ss = (SIZED_STRING*)(sz_pool + offset - 8);
-                if (ss->length == strlen(s))
-                {
-                    add_symbol((uintptr_t)ss, s);
+            if (offset >= 8) {
+                uint32_t len = *(uint32_t*)(sz_pool + offset - 8);
+                if (len == strlen(s)) {
+                    add_symbol((uintptr_t)(sz_pool + offset - 8), s);
                 }
             }
             offset += strlen(s);
