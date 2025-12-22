@@ -1,4 +1,5 @@
 
+
 #include <stdio.h>
 #include <string.h>
 #include "disassembler.h"
@@ -135,7 +136,6 @@ const char* opcode_names[256] = {
     [OP_UINT32BE] = "UINT32BE",
 };
 
-
 int get_instr_len(const uint8_t* ip)
 {
     switch(*ip)
@@ -271,25 +271,15 @@ void disassemble(const uint8_t* code_start, int rule_idx)
 {
     const uint8_t* ip = code_start;
     
-    // Find the start of the code for this rule
     while(1)
     {
         if (*ip == OP_INIT_RULE)
         {
             uint32_t current_rule_idx = *(uint32_t*)(ip + 5);
-            if (current_rule_idx == rule_idx)
-            {
-                break;
-            }
+            if (current_rule_idx == rule_idx) break;
         }
-        
         ip += get_instr_len(ip);
-
-        if (ip > code_start + 65536)
-        {
-             printf("    // Could not find code for rule\n");
-             return;
-        }
+        if (ip > code_start + 1024*1024) return;
     }
 
     const uint8_t* rule_start = ip;
@@ -298,7 +288,7 @@ void disassemble(const uint8_t* code_start, int rule_idx)
 
     while(ip < rule_end && *ip != OP_HALT)
     {
-        printf("    ");
+        printf("%04lx: ", (unsigned long)(ip - rule_start));
         print_instruction(ip);
         printf("\n");
         ip += get_instr_len(ip);
@@ -306,6 +296,6 @@ void disassemble(const uint8_t* code_start, int rule_idx)
 
     if (*ip == OP_HALT)
     {
-        printf("    HALT\n");
+        printf("%04lx: HALT\n", (unsigned long)(ip - rule_start));
     }
 }

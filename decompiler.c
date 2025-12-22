@@ -11,21 +11,21 @@ typedef struct {
     int top;
 } STACK;
 
-void stack_push(STACK* s, const char* val)
+static void stack_push(STACK* s, const char* val)
 {
     if (s->top >= 1024) return;
     s->items[s->top++] = strdup(val);
 }
 
-char* stack_pop(STACK* s)
+static char* stack_pop(STACK* s)
 {
-    if (s->top <= 0) return strdup("UNDEFINED");
+    if (s->top <= 0) return strdup("0");
     return s->items[--s->top];
 }
 
 extern int get_instr_len(const uint8_t* ip);
 
-int is_pool_literal(const char* symbol)
+static int is_pool_literal(const char* symbol)
 {
     if (symbol == NULL) return 0;
     if (symbol[0] == '$') return 0;
@@ -87,7 +87,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     {
                         if (is_pool_literal(symbol))
                         {
-                             sprintf(buf, "\"%s\"", symbol);
+                             sprintf(buf, "%s", symbol);
                              stack_push(&s, buf);
                         }
                         else stack_push(&s, symbol);
@@ -100,7 +100,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                         else
                         {
                             long long val = *(long long*)(ip + 1);
-                            if (val > 0xFFFF) sprintf(buf, "0x%llx", (unsigned long long)val);
+                            if (val > 0xFFFF || val < -0xFFFF) sprintf(buf, "0x%llx", (unsigned long long)val);
                             else sprintf(buf, "%lld", val);
                         }
                         stack_push(&s, buf);
@@ -129,8 +129,6 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_POP:
                 free(stack_pop(&s));
-                break;
-            case OP_FOUND:
                 break;
             case OP_AND:
             {
@@ -356,8 +354,6 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 free(quantifier);
                 break;
             }
-            case OP_CLEAR_M:
-                break;
             case OP_POP_M:
             {
                 uintptr_t addr = *(uintptr_t*)(ip + 1);
@@ -373,7 +369,10 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 uintptr_t addr = *(uintptr_t*)(ip + 1);
                 if (addr < 1024 && mem_slots[addr]) stack_push(&s, mem_slots[addr]);
-                else stack_push(&s, "0");
+                else {
+                    sprintf(buf, "M%lu", (unsigned long)addr);
+                    stack_push(&s, buf);
+                }
                 break;
             }
             case OP_ITER_START_INT_RANGE:
@@ -413,7 +412,14 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 free(quantifier);
                 break;
             }
+            case OP_OBJ_VALUE:
+            case OP_FOUND:
+            case OP_CLEAR_M:
             case OP_MATCH_RULE:
+            case OP_JFALSE:
+            case OP_JFALSE_P:
+            case OP_JTRUE:
+            case OP_JTRUE_P:
                 break;
         }
         ip += len;

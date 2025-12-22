@@ -23,6 +23,12 @@ size_t mapped_size = 0;
 void add_symbol(uintptr_t addr, char* name)
 {
     if (addr == 0 || name == NULL) return;
+    
+    // Debug: print symbols that look like format strings or module names
+    if (strlen(name) < 5) {
+        // printf("// DEBUG: add_symbol addr=0x%lx name=%s\n", (unsigned long)addr, name);
+    }
+
     for (int i = 0; i < num_symbols; i++)
     {
         if (symbol_table[i].addr == addr) return;
@@ -162,30 +168,24 @@ int decompile(const char* file_path)
     uint8_t* sz_pool = (uint8_t*)resolve_ref(file_mem, buffers, &(YR_ARENA_REF){.buffer_id=YR_SZ_POOL, .offset=0});
     uint32_t sz_pool_size = buffers[YR_SZ_POOL].size;
     
-    // Improved sz_pool parsing: identifying SIZED_STRINGs
-    uint32_t sz_offset = 0;
-    while(sz_offset + 8 < sz_pool_size)
+    // Comprehensive pool parsing
+    for (uint32_t offset = 0; offset < sz_pool_size; offset++)
     {
-        SIZED_STRING* ss = (SIZED_STRING*)(sz_pool + sz_offset);
-        // Heuristic: length should be reasonable and c_string should be printable
-        if (ss->length > 0 && ss->length < 1024 && ss->c_string[0] != '\0')
+        if (sz_pool[offset] != '\0')
         {
-            // Add symbol for the SIZED_STRING structure itself
-            add_symbol((uintptr_t)ss, ss->c_string);
-            sz_offset += 8 + ss->length + 1;
-            // Pad to 8-byte alignment if YARA does that? No, usually it's just packed.
-            // But let's check for null padding.
-            while(sz_offset < sz_pool_size && sz_pool[sz_offset] == '\0') sz_offset++;
-        }
-        else if (sz_pool[sz_offset] != '\0')
-        {
-            // Fallback for raw C strings
-            add_symbol((uintptr_t)(sz_pool + sz_offset), (char*)(sz_pool + sz_offset));
-            sz_offset += strlen((char*)(sz_pool + sz_offset)) + 1;
-        }
-        else
-        {
-            sz_offset++;
+            char* s = (char*)(sz_pool + offset);
+            add_symbol((uintptr_t)s, s);
+            
+            // Check if this looks like the c_string of a SIZED_STRING
+            if (offset >= 8)
+            {
+                SIZED_STRING* ss = (SIZED_STRING*)(sz_pool + offset - 8);
+                if (ss->length == strlen(s))
+                {
+                    add_symbol((uintptr_t)ss, s);
+                }
+            }
+            offset += strlen(s);
         }
     }
 
