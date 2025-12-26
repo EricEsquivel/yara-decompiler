@@ -35,12 +35,6 @@ static char* stack_pop(STACK* s)
     return s->items[--s->top];
 }
 
-static char* stack_peek(STACK* s)
-{
-    if (s->top <= 0) return strdup("");
-    return strdup(s->items[s->top-1]);
-}
-
 extern int get_instr_len(const uint8_t* ip);
 
 static int is_pool_literal(const char* symbol)
@@ -388,8 +382,6 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
                 if (addr == 0) stack_push(&s, "num_true");
-                else if (addr == 1) stack_push(&s, "total_iters");
-                else if (addr == 2) stack_push(&s, "quantifier");
                 else if (addr == 3) stack_push(&s, "i");
                 else if (addr < 1024 && mem_slots[addr]) stack_push(&s, mem_slots[addr]);
                 else {
@@ -436,20 +428,19 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_ITER_END:
             {
-                char* _cond = stack_pop(&s); 
+                char* _cond = stack_pop(&s);
                 char* _num_true = stack_pop(&s);
-                char* _total_iters = stack_pop(&s);
+                char* _quant = stack_pop(&s);
+                if (strcmp(_quant, "SENTINEL_U") == 0) { free(_quant); _quant = strdup("all"); }
+                if (strcmp(_quant, "num_true") == 0) { free(_quant); _quant = strdup("all"); }
                 
-                const char* q = (strcmp(_cond, "SENTINEL_U") == 0) ? "all" : _cond;
-                if (strcmp(q, "1") == 0) q = "any";
-
                 if (loop_start_stack != -1) {
                     while (s.top > loop_start_stack) free(stack_pop(&s));
                 }
 
-                snprintf(buf, sizeof(buf), "for %s i in %s : ( %s )", q, current_range ? current_range : "RANGE", current_loop_cond ? current_loop_cond : "CONDITION");
+                snprintf(buf, sizeof(buf), "for %s i in %s : ( %s )", _quant, current_range ? current_range : "RANGE", current_loop_cond ? current_loop_cond : "CONDITION");
                 stack_push(&s, buf);
-                free(_cond); free(_num_true); free(_total_iters);
+                free(_cond); free(_num_true); free(_quant);
                 loop_start_stack = -1;
                 break;
             }
@@ -459,6 +450,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
         curr_ip += len;
     }
 
+    // Final consolidation
     while (s.top > 1)
     {
         char* v2 = stack_pop(&s);
