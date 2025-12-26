@@ -32,7 +32,8 @@ static void stack_push(STACK* s, const char* val)
 static char* stack_pop(STACK* s)
 {
     if (s->top <= 0) return strdup("");
-    return s->items[--s->top];
+    char* val = s->items[--s->top];
+    return val;
 }
 
 extern int get_instr_len(const uint8_t* ip);
@@ -98,7 +99,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     {
                         if (is_pool_literal(symbol))
                         {
-                             snprintf(buf, sizeof(buf), "%s", symbol);
+                             snprintf(buf, sizeof(buf), "\"%s\"", symbol);
                              stack_push(&s, buf);
                         }
                         else stack_push(&s, symbol);
@@ -147,6 +148,10 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* v1 = stack_pop(&s);
                 if (strcmp(v1, "SENTINEL_U") == 0) stack_push(&s, v2);
                 else if (strcmp(v2, "SENTINEL_U") == 0) stack_push(&s, v1);
+                else if (strcmp(v1, "1") == 0) stack_push(&s, v2);
+                else if (strcmp(v2, "1") == 0) stack_push(&s, v1);
+                else if (strcmp(v1, "num_true") == 0) stack_push(&s, v2);
+                else if (strcmp(v2, "num_true") == 0) stack_push(&s, v1);
                 else if (strlen(v1) == 0) stack_push(&s, v2);
                 else if (strlen(v2) == 0) stack_push(&s, v1);
                 else {
@@ -162,6 +167,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* v1 = stack_pop(&s);
                 if (strcmp(v1, "SENTINEL_U") == 0) stack_push(&s, v2);
                 else if (strcmp(v2, "SENTINEL_U") == 0) stack_push(&s, v1);
+                else if (strcmp(v1, "0") == 0) stack_push(&s, v2);
+                else if (strcmp(v2, "0") == 0) stack_push(&s, v1);
                 else if (strlen(v1) == 0) stack_push(&s, v2);
                 else if (strlen(v2) == 0) stack_push(&s, v1);
                 else {
@@ -174,7 +181,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_NOT:
             {
                 char* v1 = stack_pop(&s);
-                if (strlen(v1) > 0 && strcmp(v1, "SENTINEL_U") != 0) {
+                if (strlen(v1) > 0 && strcmp(v1, "SENTINEL_U") != 0 && strcmp(v1, "num_true") != 0) {
                     snprintf(buf, sizeof(buf), "not %s", v1);
                     stack_push(&s, buf);
                 }
@@ -428,19 +435,20 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_ITER_END:
             {
-                char* _cond = stack_pop(&s);
+                char* _cond = stack_pop(&s); // quantifier
                 char* _num_true = stack_pop(&s);
-                char* _quant = stack_pop(&s);
-                if (strcmp(_quant, "SENTINEL_U") == 0) { free(_quant); _quant = strdup("all"); }
-                if (strcmp(_quant, "num_true") == 0) { free(_quant); _quant = strdup("all"); }
+                char* _total_iters = stack_pop(&s);
                 
+                const char* q = (strcmp(_cond, "SENTINEL_U") == 0 || strcmp(_cond, "num_true") == 0) ? "all" : _cond;
+                if (strcmp(q, "1") == 0) q = "any";
+
                 if (loop_start_stack != -1) {
                     while (s.top > loop_start_stack) free(stack_pop(&s));
                 }
 
-                snprintf(buf, sizeof(buf), "for %s i in %s : ( %s )", _quant, current_range ? current_range : "RANGE", current_loop_cond ? current_loop_cond : "CONDITION");
+                snprintf(buf, sizeof(buf), "for %s i in %s : ( %s )", q, current_range ? current_range : "RANGE", current_loop_cond ? current_loop_cond : "CONDITION");
                 stack_push(&s, buf);
-                free(_cond); free(_num_true); free(_quant);
+                free(_cond); free(_num_true); free(_total_iters);
                 loop_start_stack = -1;
                 break;
             }
