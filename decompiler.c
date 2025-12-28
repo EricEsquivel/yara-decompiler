@@ -36,17 +36,32 @@ static char* stack_pop(STACK* s)
     return val;
 }
 
+static char* stack_peek(STACK* s)
+{
+    if (s->top <= 0) return strdup("");
+    return strdup(s->items[s->top-1]);
+}
+
 extern int get_instr_len(const uint8_t* ip);
 
 static int is_pool_literal(const char* symbol)
 {
     if (symbol == NULL || symbol[0] == '\0') return 0;
     if (symbol[0] == '$') return 0;
+    
     const char* modules[] = {"pe", "elf", "math", "dotnet", "hash", "magic", "cuckoo", "console", "time", "dex", "macho", "all", "any", "them"};
     for (int i = 0; i < (int)(sizeof(modules)/sizeof(modules[0])); i++)
     {
         if (strcmp(symbol, modules[i]) == 0) return 0;
     }
+    
+    // Loop variables i, j, k etc.
+    if (strlen(symbol) == 1 && symbol[0] >= 'a' && symbol[0] <= 'z') return 0;
+
+    char* endptr;
+    strtol(symbol, &endptr, 10);
+    if (*endptr == '\0') return 0;
+
     return 1;
 }
 
@@ -76,9 +91,11 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
     for(int i=0; i<1024; i++) mem_slots[i] = NULL;
 
     char buf[16384];
-    char* current_range = NULL;
-    char* current_loop_cond = NULL;
-    int loop_start_stack = -1;
+    char* current_range[16];
+    char* current_loop_cond[16];
+    for(int i=0; i<16; i++) { current_range[i] = NULL; current_loop_cond[i] = NULL; }
+    
+    int loop_depth = 0;
 
     const uint8_t* curr_ip = rule_start + get_instr_len(rule_start);
     while(curr_ip < rule_end && *curr_ip != OP_HALT && *curr_ip != OP_MATCH_RULE)
@@ -146,14 +163,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 char* v2 = stack_pop(&s);
                 char* v1 = stack_pop(&s);
-                if (strcmp(v1, "SENTINEL_U") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "SENTINEL_U") == 0) stack_push(&s, v1);
-                else if (strcmp(v1, "1") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "1") == 0) stack_push(&s, v1);
-                else if (strcmp(v1, "num_true") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "num_true") == 0) stack_push(&s, v1);
-                else if (strlen(v1) == 0) stack_push(&s, v2);
-                else if (strlen(v2) == 0) stack_push(&s, v1);
+                if (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "1") == 0 || strcmp(v1, "num_true") == 0) stack_push(&s, v2);
+                else if (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "1") == 0 || strcmp(v2, "num_true") == 0) stack_push(&s, v1);
                 else {
                     snprintf(buf, sizeof(buf), "(%s and %s)", v1, v2);
                     stack_push(&s, buf);
@@ -165,12 +176,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 char* v2 = stack_pop(&s);
                 char* v1 = stack_pop(&s);
-                if (strcmp(v1, "SENTINEL_U") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "SENTINEL_U") == 0) stack_push(&s, v1);
-                else if (strcmp(v1, "0") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "0") == 0) stack_push(&s, v1);
-                else if (strlen(v1) == 0) stack_push(&s, v2);
-                else if (strlen(v2) == 0) stack_push(&s, v1);
+                if (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "0") == 0) stack_push(&s, v2);
+                else if (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "0") == 0) stack_push(&s, v1);
                 else {
                     snprintf(buf, sizeof(buf), "(%s or %s)", v1, v2);
                     stack_push(&s, buf);
@@ -181,7 +188,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_NOT:
             {
                 char* v1 = stack_pop(&s);
-                if (strlen(v1) > 0 && strcmp(v1, "SENTINEL_U") != 0 && strcmp(v1, "num_true") != 0) {
+                if (strcmp(v1, "SENTINEL_U") != 0 && strcmp(v1, "num_true") != 0 && strlen(v1) > 0) {
                     snprintf(buf, sizeof(buf), "not %s", v1);
                     stack_push(&s, buf);
                 }
@@ -259,14 +266,28 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 else stack_push(&s, "UNKNOWN_OBJ");
                 break;
             }
+            case OP_OBJ_VALUE:
+                break;
             case OP_OBJ_FIELD:
             {
                 uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
                 char* field_name = find_symbol(addr);
                 char* obj = stack_pop(&s);
-                snprintf(buf, sizeof(buf), "%s.%s", obj, field_name ? field_name : "UNKNOWN_FIELD");
-                stack_push(&s, buf);
+                if (strcmp(obj, "SENTINEL_U") == 0) stack_push(&s, field_name ? field_name : "UNKNOWN_FIELD");
+                else {
+                    snprintf(buf, sizeof(buf), "%s.%s", obj, field_name ? field_name : "UNKNOWN_FIELD");
+                    stack_push(&s, buf);
+                }
                 free(obj);
+                break;
+            }
+            case OP_INDEX_ARRAY:
+            {
+                char* index = stack_pop(&s);
+                char* obj = stack_pop(&s);
+                snprintf(buf, sizeof(buf), "%s[%s]", obj, index);
+                stack_push(&s, buf);
+                free(index); free(obj);
                 break;
             }
             case OP_CALL:
@@ -356,7 +377,15 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 break;
             }
             case OP_OF:
+            case OP_OF_FOUND_IN:
             {
+                char* range_end = NULL;
+                char* range_start = NULL;
+                if (opcode == OP_OF_FOUND_IN) {
+                    range_end = stack_pop(&s);
+                    range_start = stack_pop(&s);
+                }
+
                 char* set_items[128];
                 int set_count = 0;
                 char* item = stack_pop(&s);
@@ -381,6 +410,14 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     }
                     strcat(buf, ")");
                 }
+                
+                if (opcode == OP_OF_FOUND_IN) {
+                    char temp[16384];
+                    snprintf(temp, sizeof(temp), "%s in (%s..%s)", buf, range_start, range_end);
+                    strcpy(buf, temp);
+                    free(range_start); free(range_end);
+                }
+
                 stack_push(&s, buf);
                 free(quantifier);
                 break;
@@ -388,8 +425,11 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_PUSH_M:
             {
                 uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
-                if (addr == 0) stack_push(&s, "num_true");
-                else if (addr == 3) stack_push(&s, "i");
+                if (addr % 4 == 0) stack_push(&s, "num_true");
+                else if (addr % 4 == 3) {
+                    snprintf(buf, sizeof(buf), "%c", 'i' + (int)(addr/4));
+                    stack_push(&s, buf);
+                }
                 else if (addr < 1024 && mem_slots[addr]) stack_push(&s, mem_slots[addr]);
                 else {
                     snprintf(buf, sizeof(buf), "M%lu", (unsigned long)addr);
@@ -413,11 +453,11 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* end = stack_pop(&s);
                 char* start = stack_pop(&s);
                 snprintf(buf, sizeof(buf), "(%s..%s)", start, end);
-                if (current_range) free(current_range);
-                current_range = strdup(buf);
+                if (current_range[loop_depth]) free(current_range[loop_depth]);
+                current_range[loop_depth] = strdup(buf);
                 stack_push(&s, buf);
                 free(start); free(end);
-                loop_start_stack = s.top;
+                loop_depth++;
                 break;
             }
             case OP_ITER_CONDITION:
@@ -425,8 +465,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* _quant = stack_pop(&s);
                 char* _num_true = stack_pop(&s);
                 char* _cond = stack_pop(&s);
-                if (current_loop_cond) free(current_loop_cond);
-                current_loop_cond = strdup(_cond);
+                if (current_loop_cond[loop_depth-1]) free(current_loop_cond[loop_depth-1]);
+                current_loop_cond[loop_depth-1] = strdup(_cond);
                 stack_push(&s, _quant);
                 stack_push(&s, _num_true);
                 stack_push(&s, _cond);
@@ -435,52 +475,62 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_ITER_END:
             {
-                char* _cond = stack_pop(&s); // quantifier
+                char* _cond = stack_pop(&s);
                 char* _num_true = stack_pop(&s);
                 char* _total_iters = stack_pop(&s);
-                
-                const char* q = (strcmp(_cond, "SENTINEL_U") == 0 || strcmp(_cond, "num_true") == 0) ? "all" : _cond;
+                const char* q = (strcmp(_cond, "SENTINEL_U") == 0) ? "all" : _cond;
                 if (strcmp(q, "1") == 0) q = "any";
-
-                if (loop_start_stack != -1) {
-                    while (s.top > loop_start_stack) free(stack_pop(&s));
-                }
-
-                snprintf(buf, sizeof(buf), "for %s i in %s : ( %s )", q, current_range ? current_range : "RANGE", current_loop_cond ? current_loop_cond : "CONDITION");
+                
+                char var_name = 'i' + loop_depth - 1;
+                snprintf(buf, sizeof(buf), "for %s %c in %s : ( %s )", q, var_name, current_range[loop_depth-1] ? current_range[loop_depth-1] : "RANGE", current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "CONDITION");
                 stack_push(&s, buf);
                 free(_cond); free(_num_true); free(_total_iters);
-                loop_start_stack = -1;
+                loop_depth--;
                 break;
             }
+            case OP_JFALSE:
+            case OP_JTRUE:
+                break;
+            case OP_JFALSE_P:
+            case OP_JTRUE_P:
+                free(stack_pop(&s));
+                break;
             default:
                 break;
         }
         curr_ip += len;
     }
 
-    // Final consolidation
+    // Final consolidation with sub-expression suppression
     while (s.top > 1)
     {
         char* v2 = stack_pop(&s);
         char* v1 = stack_pop(&s);
-        if (strlen(v1) > 0 && strlen(v2) > 0 && strcmp(v1, "SENTINEL_U") != 0 && strcmp(v2, "SENTINEL_U") != 0) {
+        
+        if (strlen(v1) == 0 || strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "num_true") == 0 || strcmp(v1, "1") == 0 || strcmp(v1, "0") == 0) {
+            stack_push(&s, v2);
+        } else if (strlen(v2) == 0 || strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "num_true") == 0 || strcmp(v2, "1") == 0 || strcmp(v2, "0") == 0) {
+            stack_push(&s, v1);
+        } else if (strstr(v1, v2) != NULL) {
+            stack_push(&s, v1);
+        } else if (strstr(v2, v1) != NULL) {
+            stack_push(&s, v2);
+        } else {
             snprintf(buf, sizeof(buf), "(%s and %s)", v1, v2);
             stack_push(&s, buf);
-        } else if (strlen(v1) > 0 && strcmp(v1, "SENTINEL_U") != 0) stack_push(&s, v1);
-        else if (strlen(v2) > 0 && strcmp(v2, "SENTINEL_U") != 0) stack_push(&s, v2);
+        }
         free(v1); free(v2);
     }
 
     if (s.top > 0)
     {
         char* res = stack_pop(&s);
-        if (strlen(res) > 0 && strcmp(res, "SENTINEL_U") != 0) printf("    %s\n", res);
+        if (strlen(res) > 0 && strcmp(res, "SENTINEL_U") != 0 && strcmp(res, "num_true") != 0 && strcmp(res, "1") != 0 && strcmp(res, "0") != 0) printf("    %s\n", res);
         free(res);
     }
     
     while(s.top > 0) free(stack_pop(&s));
     free(s.items);
     for(int i=0; i<1024; i++) if (mem_slots[i]) free(mem_slots[i]);
-    if (current_range) free(current_range);
-    if (current_loop_cond) free(current_loop_cond);
+    for(int i=0; i<16; i++) { if (current_range[i]) free(current_range[i]); if (current_loop_cond[i]) free(current_loop_cond[i]); }
 }
