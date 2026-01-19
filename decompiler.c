@@ -259,7 +259,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                                  opcode == OP_MOD ? "%" :
                                  opcode == OP_INT_ADD || opcode == OP_DBL_ADD ? "+" :
                                  opcode == OP_INT_SUB || opcode == OP_DBL_SUB ? "-" :
-                                 opcode == OP_INT_MUL || opcode == OP_DBL_MUL ? "*" : "/";
+                                 opcode == OP_INT_MUL || opcode == OP_DBL_MUL ? "*" :
+                                 opcode == OP_INT_DIV ? "\\" : "/";
                 snprintf(buf, sizeof(buf), "(%s %s %s)", v1, op, v2);
                 stack_push(&s, buf);
                 free(v1); free(v2);

@@ -172,7 +172,7 @@ class TestConditionRegression:
         ('rule t { condition: 1 + 2 == 3 }', '+'),
         ('rule t { condition: 5 - 3 == 2 }', '-'),
         ('rule t { condition: 2 * 3 == 6 }', '*'),
-        ('rule t { condition: 6 / 2 == 3 }', '/'),
+        ('rule t { condition: 6 \ 2 == 3 }', '\\'),
         ('rule t { condition: 7 % 3 == 1 }', '%'),
 
         # Bitwise
