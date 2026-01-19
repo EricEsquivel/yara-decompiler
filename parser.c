@@ -8,10 +8,10 @@
 
 #include "decompiler.h"
 #include "disassembler.h"
-#include "../libyara/include/yara/types.h"
-#include "../libyara/include/yara/arena.h"
-#include "../libyara/include/yara/compiler.h"
-#include "../libyara/include/yara/exec.h"
+#include "yara/libyara/include/yara/types.h"
+#include "yara/libyara/include/yara/arena.h"
+#include "yara/libyara/include/yara/compiler.h"
+#include "yara/libyara/include/yara/exec.h"
 
 
 SYMBOL* symbol_table = NULL;

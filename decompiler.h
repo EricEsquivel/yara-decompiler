@@ -2,8 +2,8 @@
 #define YARA_DECOMPILER_H
 
 #include <stdint.h>
-#include "../libyara/include/yara/types.h"
-#include "../libyara/include/yara/arena.h"
+#include "yara/libyara/include/yara/types.h"
+#include "yara/libyara/include/yara/arena.h"
 
 typedef struct _DECOMPILED_META
 {

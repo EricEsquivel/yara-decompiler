@@ -4,8 +4,8 @@
 #include <string.h>
 #include "disassembler.h"
 #include "decompiler.h"
-#include "../libyara/include/yara/exec.h"
-#include "../libyara/include/yara/compiler.h"
+#include "yara/libyara/include/yara/exec.h"
+#include "yara/libyara/include/yara/compiler.h"
 
 const char* opcode_names[256] = {
     [OP_ERROR] = "ERROR",

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "decompiler.h"
-#include "../libyara/include/yara/types.h"
+#include "yara/libyara/include/yara/types.h"
 
 void print_meta(YR_META* meta, uint8_t* file_mem, YR_ARENA_FILE_BUFFER* buffers)
 {

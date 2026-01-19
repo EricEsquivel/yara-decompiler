@@ -3,8 +3,8 @@
 #include <string.h>
 #include <math.h>
 #include "decompiler.h"
-#include "../libyara/include/yara/exec.h"
-#include "../libyara/include/yara/compiler.h"
+#include "yara/libyara/include/yara/exec.h"
+#include "yara/libyara/include/yara/compiler.h"
 
 typedef struct {
     char** items;
