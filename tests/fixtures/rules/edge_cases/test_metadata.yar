@@ -1,0 +1,41 @@
+// Edge case tests for metadata handling
+// NOTE: Escape sequences in metadata strings may not be perfectly preserved
+
+rule all_meta_types
+{
+    meta:
+        string_val = "test string"
+        int_val = 42
+        neg_int_val = -10
+        bool_true = true
+        bool_false = false
+    condition:
+        true
+}
+
+rule empty_string_meta
+{
+    meta:
+        empty = ""
+        space = " "
+    condition:
+        true
+}
+
+rule long_meta_value
+{
+    meta:
+        long_string = "This is a very long metadata string that should be preserved"
+    condition:
+        true
+}
+
+rule multiple_same_key
+{
+    meta:
+        reference = "first reference"
+        reference = "second reference"
+        reference = "third reference"
+    condition:
+        true
+}
