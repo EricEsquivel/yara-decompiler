@@ -20,6 +20,17 @@ int show_disassembly = 0;
 uintptr_t mapped_base = 0;
 size_t mapped_size = 0;
 
+// Rule names indexed by rule index (for PUSH_RULE)
+char** rule_names = NULL;
+int num_rules = 0;
+
+char* get_rule_name(int rule_idx)
+{
+    if (rule_idx >= 0 && rule_idx < num_rules && rule_names[rule_idx])
+        return rule_names[rule_idx];
+    return NULL;
+}
+
 void add_symbol(uintptr_t addr, char* name)
 {
     if (addr == 0 || name == NULL) return;
@@ -193,11 +204,17 @@ int decompile(const char* file_path)
         }
     }
 
+    // Build rule name lookup table (for PUSH_RULE)
+    num_rules = summary->num_rules;
+    rule_names = malloc(num_rules * sizeof(char*));
+    for (int i = 0; i < num_rules; i++) rule_names[i] = NULL;
+
     for (int i = 0; i < summary->num_rules; i++)
     {
         YR_RULE* rule = (YR_RULE*)((uint8_t*)rules_table + i * sizeof(YR_RULE));
         if (RULE_IS_NULL(rule)) continue;
         add_symbol((uintptr_t)rule, (char*)rule->identifier);
+        rule_names[i] = strdup((char*)rule->identifier);
     }
 
     const uint8_t* ip = code_start;

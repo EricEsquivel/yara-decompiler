@@ -93,8 +93,9 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
     char buf[16384];
     char* current_range[16];
     char* current_loop_cond[16];
-    for(int i=0; i<16; i++) { current_range[i] = NULL; current_loop_cond[i] = NULL; }
-    
+    int loop_is_string_set[16];  // 0 = int range, 1 = string set
+    for(int i=0; i<16; i++) { current_range[i] = NULL; current_loop_cond[i] = NULL; loop_is_string_set[i] = 0; }
+
     int loop_depth = 0;
 
     const uint8_t* curr_ip = rule_start + get_instr_len(rule_start);
@@ -140,6 +141,20 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_PUSH_U:
                 stack_push(&s, "SENTINEL_U");
                 break;
+            case OP_PUSH_RULE:
+            {
+                // PUSH_RULE pushes the result of another rule (1 if matched, 0 if not)
+                // For decompilation, we output the rule name as a reference
+                uint64_t rule_idx = *(uint64_t*)(curr_ip + 1);
+                char* rule_name = get_rule_name((int)rule_idx);
+                if (rule_name) {
+                    stack_push(&s, rule_name);
+                } else {
+                    snprintf(buf, sizeof(buf), "rule_%llu", (unsigned long long)rule_idx);
+                    stack_push(&s, buf);
+                }
+                break;
+            }
             case OP_PUSH_8:
                 snprintf(buf, sizeof(buf), "%d", *(uint8_t*)(curr_ip + 1));
                 stack_push(&s, buf);
@@ -163,8 +178,15 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 char* v2 = stack_pop(&s);
                 char* v1 = stack_pop(&s);
-                if (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "1") == 0 || strcmp(v1, "num_true") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "1") == 0 || strcmp(v2, "num_true") == 0) stack_push(&s, v1);
+                // Suppress internal placeholders
+                int v1_internal = (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "1") == 0 ||
+                                   strcmp(v1, "num_true") == 0 || strcmp(v1, "ITER_INT_RANGE") == 0 ||
+                                   strcmp(v1, "ITER_STRING_SET") == 0 || strcmp(v1, "ITER_HAS_MORE") == 0);
+                int v2_internal = (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "1") == 0 ||
+                                   strcmp(v2, "num_true") == 0 || strcmp(v2, "ITER_INT_RANGE") == 0 ||
+                                   strcmp(v2, "ITER_STRING_SET") == 0 || strcmp(v2, "ITER_HAS_MORE") == 0);
+                if (v1_internal) stack_push(&s, v2);
+                else if (v2_internal) stack_push(&s, v1);
                 else {
                     snprintf(buf, sizeof(buf), "(%s and %s)", v1, v2);
                     stack_push(&s, buf);
@@ -176,8 +198,15 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 char* v2 = stack_pop(&s);
                 char* v1 = stack_pop(&s);
-                if (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "0") == 0) stack_push(&s, v2);
-                else if (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "0") == 0) stack_push(&s, v1);
+                // Suppress internal placeholders
+                int v1_internal = (strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "0") == 0 ||
+                                   strcmp(v1, "ITER_INT_RANGE") == 0 || strcmp(v1, "ITER_STRING_SET") == 0 ||
+                                   strcmp(v1, "ITER_HAS_MORE") == 0);
+                int v2_internal = (strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "0") == 0 ||
+                                   strcmp(v2, "ITER_INT_RANGE") == 0 || strcmp(v2, "ITER_STRING_SET") == 0 ||
+                                   strcmp(v2, "ITER_HAS_MORE") == 0);
+                if (v1_internal) stack_push(&s, v2);
+                else if (v2_internal) stack_push(&s, v1);
                 else {
                     snprintf(buf, sizeof(buf), "(%s or %s)", v1, v2);
                     stack_push(&s, buf);
@@ -190,6 +219,16 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* v1 = stack_pop(&s);
                 if (strcmp(v1, "SENTINEL_U") != 0 && strcmp(v1, "num_true") != 0 && strlen(v1) > 0) {
                     snprintf(buf, sizeof(buf), "not %s", v1);
+                    stack_push(&s, buf);
+                }
+                free(v1);
+                break;
+            }
+            case OP_DEFINED:
+            {
+                char* v1 = stack_pop(&s);
+                if (strcmp(v1, "SENTINEL_U") != 0 && strlen(v1) > 0) {
+                    snprintf(buf, sizeof(buf), "defined %s", v1);
                     stack_push(&s, buf);
                 }
                 free(v1);
@@ -338,9 +377,14 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_OFFSET:
             {
-                char* str = stack_pop(&s); 
-                char* idx = stack_pop(&s); 
-                if (str[0] == '$') snprintf(buf, sizeof(buf), "@%s[%s]", str+1, idx);
+                char* str = stack_pop(&s);
+                char* idx = stack_pop(&s);
+                // Check if this is a bare @ in a for..of loop (string is "#" placeholder)
+                if (strcmp(str, "#") == 0) {
+                    // In "for any of ($a,$b) : (@ > 100)", @ refers to current string
+                    snprintf(buf, sizeof(buf), "@");
+                }
+                else if (str[0] == '$') snprintf(buf, sizeof(buf), "@%s[%s]", str+1, idx);
                 else snprintf(buf, sizeof(buf), "@%s[%s]", str, idx);
                 stack_push(&s, buf);
                 free(str); free(idx);
@@ -348,6 +392,9 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_FILESIZE:
                 stack_push(&s, "filesize");
+                break;
+            case OP_ENTRYPOINT:
+                stack_push(&s, "entrypoint");
                 break;
             case OP_FOUND_AT:
             {
@@ -378,6 +425,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             }
             case OP_OF:
             case OP_OF_FOUND_IN:
+            case OP_OF_PERCENT:
             {
                 char* range_end = NULL;
                 char* range_start = NULL;
@@ -394,14 +442,24 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     set_items[set_count++] = item;
                     item = stack_pop(&s);
                 }
-                free(item); 
+                free(item);
                 char* quantifier = stack_pop(&s);
                 if (strcmp(quantifier, "SENTINEL_U") == 0) { free(quantifier); quantifier = strdup("all"); }
-                
-                if (set_count == 0) {
-                    snprintf(buf, sizeof(buf), "%s of them", quantifier);
+                // Handle "none of" - quantifier of 0 means none
+                else if (strcmp(quantifier, "0") == 0) { free(quantifier); quantifier = strdup("none"); }
+
+                // Format quantifier with % for percentage-based matching
+                char quant_buf[64];
+                if (opcode == OP_OF_PERCENT) {
+                    snprintf(quant_buf, sizeof(quant_buf), "%s%%", quantifier);
                 } else {
-                    snprintf(buf, sizeof(buf), "%s of (", quantifier);
+                    snprintf(quant_buf, sizeof(quant_buf), "%s", quantifier);
+                }
+
+                if (set_count == 0) {
+                    snprintf(buf, sizeof(buf), "%s of them", quant_buf);
+                } else {
+                    snprintf(buf, sizeof(buf), "%s of (", quant_buf);
                     for(int i=set_count-1; i>=0; i--)
                     {
                         strcat(buf, set_items[i]);
@@ -410,7 +468,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     }
                     strcat(buf, ")");
                 }
-                
+
                 if (opcode == OP_OF_FOUND_IN) {
                     char temp[16384];
                     snprintf(temp, sizeof(temp), "%s in (%s..%s)", buf, range_start, range_end);
@@ -427,8 +485,14 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
                 if (addr % 4 == 0) stack_push(&s, "num_true");
                 else if (addr % 4 == 3) {
-                    snprintf(buf, sizeof(buf), "%c", 'i' + (int)(addr/4));
-                    stack_push(&s, buf);
+                    // Check if we have a stored value first (for string set iterations)
+                    if (addr < 1024 && mem_slots[addr] && strcmp(mem_slots[addr], "#") == 0) {
+                        stack_push(&s, mem_slots[addr]);
+                    } else {
+                        // Integer range loop variable
+                        snprintf(buf, sizeof(buf), "%c", 'i' + (int)(addr/4));
+                        stack_push(&s, buf);
+                    }
                 }
                 else if (addr < 1024 && mem_slots[addr]) stack_push(&s, mem_slots[addr]);
                 else {
@@ -455,9 +519,71 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 snprintf(buf, sizeof(buf), "(%s..%s)", start, end);
                 if (current_range[loop_depth]) free(current_range[loop_depth]);
                 current_range[loop_depth] = strdup(buf);
-                stack_push(&s, buf);
+                loop_is_string_set[loop_depth] = 0;  // Integer range loop
+                // Push iterator placeholder - will be consumed by POP after loop completes
+                stack_push(&s, "ITER_INT_RANGE");
                 free(start); free(end);
                 loop_depth++;
+                break;
+            }
+            case OP_ITER_START_STRING_SET:
+            case OP_ITER_START_TEXT_STRING_SET:
+            {
+                // Pop count from stack
+                char* count_str = stack_pop(&s);
+                int count = atoi(count_str);
+                free(count_str);
+
+                // Pop string references
+                char* set_items[128];
+                int set_count = 0;
+                for (int i = 0; i < count && i < 128; i++) {
+                    set_items[set_count++] = stack_pop(&s);
+                }
+
+                // Pop sentinel
+                char* sentinel = stack_pop(&s);
+                free(sentinel);
+
+                // Build string set representation
+                snprintf(buf, sizeof(buf), "(");
+                for (int i = set_count - 1; i >= 0; i--) {
+                    strcat(buf, set_items[i]);
+                    if (i > 0) strcat(buf, ", ");
+                    free(set_items[i]);
+                }
+                strcat(buf, ")");
+
+                if (current_range[loop_depth]) free(current_range[loop_depth]);
+                current_range[loop_depth] = strdup(buf);
+                loop_is_string_set[loop_depth] = 1;  // String set loop
+
+                // Push iterator placeholder
+                stack_push(&s, "ITER_STRING_SET");
+                loop_depth++;
+                break;
+            }
+            case OP_ITER_NEXT:
+            {
+                // Pop iterator, push it back, then push has_more, then current item
+                // Stack order: [iter, has_more, current_item]
+                // After this: POP_M stores current_item, JTRUE_P checks has_more
+                char* iter = stack_pop(&s);
+                // Push iterator back (stack_push makes a copy)
+                stack_push(&s, iter);
+                free(iter);  // Free the original after pushing a copy
+                // Push has_more flag (will be consumed by JTRUE_P after POP_M)
+                stack_push(&s, "ITER_HAS_MORE");
+                // For string set iterations, push "#" placeholder
+                // For integer range iterations, push the loop variable name
+                if (loop_depth > 0 && loop_is_string_set[loop_depth - 1]) {
+                    stack_push(&s, "#");  // Current string in iteration
+                } else {
+                    // Integer range loop - push variable name
+                    char var_name = 'i' + (loop_depth > 0 ? loop_depth - 1 : 0);
+                    snprintf(buf, sizeof(buf), "%c", var_name);
+                    stack_push(&s, buf);
+                }
                 break;
             }
             case OP_ITER_CONDITION:
@@ -480,9 +606,21 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 char* _total_iters = stack_pop(&s);
                 const char* q = (strcmp(_cond, "SENTINEL_U") == 0) ? "all" : _cond;
                 if (strcmp(q, "1") == 0) q = "any";
-                
-                char var_name = 'i' + loop_depth - 1;
-                snprintf(buf, sizeof(buf), "for %s %c in %s : ( %s )", q, var_name, current_range[loop_depth-1] ? current_range[loop_depth-1] : "RANGE", current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "CONDITION");
+
+                if (loop_is_string_set[loop_depth - 1]) {
+                    // String set loop: "for any of ($a, $b) : ( condition )"
+                    snprintf(buf, sizeof(buf), "for %s of %s : ( %s )",
+                             q,
+                             current_range[loop_depth-1] ? current_range[loop_depth-1] : "them",
+                             current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "true");
+                } else {
+                    // Integer range loop: "for any i in (0..10) : ( condition )"
+                    char var_name = 'i' + loop_depth - 1;
+                    snprintf(buf, sizeof(buf), "for %s %c in %s : ( %s )",
+                             q, var_name,
+                             current_range[loop_depth-1] ? current_range[loop_depth-1] : "RANGE",
+                             current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "CONDITION");
+                }
                 stack_push(&s, buf);
                 free(_cond); free(_num_true); free(_total_iters);
                 loop_depth--;
@@ -502,14 +640,17 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
     }
 
     // Final consolidation with sub-expression suppression
+    // Helper to check if a value is an internal placeholder that should be suppressed
+    #define IS_INTERNAL(v) (strlen(v) == 0 || strcmp(v, "SENTINEL_U") == 0 || strcmp(v, "num_true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "0") == 0 || strcmp(v, "ITER_STRING_SET") == 0 || strcmp(v, "ITER_HAS_MORE") == 0 || strcmp(v, "ITER_INT_RANGE") == 0)
+
     while (s.top > 1)
     {
         char* v2 = stack_pop(&s);
         char* v1 = stack_pop(&s);
-        
-        if (strlen(v1) == 0 || strcmp(v1, "SENTINEL_U") == 0 || strcmp(v1, "num_true") == 0 || strcmp(v1, "1") == 0 || strcmp(v1, "0") == 0) {
+
+        if (IS_INTERNAL(v1)) {
             stack_push(&s, v2);
-        } else if (strlen(v2) == 0 || strcmp(v2, "SENTINEL_U") == 0 || strcmp(v2, "num_true") == 0 || strcmp(v2, "1") == 0 || strcmp(v2, "0") == 0) {
+        } else if (IS_INTERNAL(v2)) {
             stack_push(&s, v1);
         } else if (strstr(v1, v2) != NULL) {
             stack_push(&s, v1);
@@ -525,8 +666,22 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
     if (s.top > 0)
     {
         char* res = stack_pop(&s);
-        if (strlen(res) > 0 && strcmp(res, "SENTINEL_U") != 0 && strcmp(res, "num_true") != 0 && strcmp(res, "1") != 0 && strcmp(res, "0") != 0) printf("    %s\n", res);
+        if (strcmp(res, "1") == 0) {
+            printf("    true\n");
+        } else if (strcmp(res, "0") == 0) {
+            printf("    false\n");
+        } else if (strlen(res) > 0 && strcmp(res, "SENTINEL_U") != 0 && strcmp(res, "num_true") != 0) {
+            printf("    %s\n", res);
+        } else {
+            // Empty condition - output true as fallback
+            printf("    true\n");
+        }
         free(res);
+    }
+    else
+    {
+        // No condition on stack - output true as fallback
+        printf("    true\n");
     }
     
     while(s.top > 0) free(stack_pop(&s));

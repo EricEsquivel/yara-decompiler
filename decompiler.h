@@ -72,7 +72,12 @@ extern int num_symbols;
 extern uintptr_t mapped_base;
 extern size_t mapped_size;
 
+// Rule names indexed by rule index (for PUSH_RULE)
+extern char** rule_names;
+extern int num_rules;
+
 char* find_symbol(uintptr_t addr);
+char* get_rule_name(int rule_idx);
 
 void decompile_rule_condition(const uint8_t* code_start, int rule_idx);
 

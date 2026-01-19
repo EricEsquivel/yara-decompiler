@@ -70,6 +70,9 @@ void print_string(YR_STRING* string, uint8_t* file_mem, YR_ARENA_FILE_BUFFER* bu
         if (STRING_IS_FULL_WORD(string)) printf(" fullword");
     }
     if (STRING_IS_PRIVATE(string)) printf(" private");
+    if (STRING_IS_XOR(string)) printf(" xor");
+    if (STRING_IS_BASE64(string)) printf(" base64");
+    if (STRING_IS_BASE64_WIDE(string)) printf(" base64wide");
 
     printf("\n");
 }
