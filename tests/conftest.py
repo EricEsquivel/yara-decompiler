@@ -16,11 +16,11 @@ REPO_ROOT = Path(__file__).parent.parent
 DECOMPILER_BIN = REPO_ROOT / "yara-decompiler"
 # Look for yarac/yara - prioritize project's compiled version
 def find_yara_binary(name):
-    # Check parent yara directory first (the project's compiled version)
-    parent_yara = REPO_ROOT.parent / name
-    if parent_yara.exists():
-        return str(parent_yara)
-    # Check sibling .libs directory
+    # Check yara submodule directory first (the project's compiled version)
+    submodule_bin = REPO_ROOT / "yara" / name
+    if submodule_bin.exists():
+        return str(submodule_bin)
+    # Check sibling .libs directory (legacy/flat structure)
     libs_path = REPO_ROOT.parent / ".libs" / name
     if libs_path.exists():
         return str(libs_path)
