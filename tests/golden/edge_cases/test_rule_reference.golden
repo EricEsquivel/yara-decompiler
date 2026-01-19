@@ -1,0 +1,12 @@
+rule base_rule
+{
+  strings:
+  $a = "test" ascii
+  condition:
+  $a
+}
+rule rule_ref_simple
+{
+  condition:
+  base_rule
+}

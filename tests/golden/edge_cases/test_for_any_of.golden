@@ -1,0 +1,9 @@
+rule for_any_of_with_offset
+{
+  strings:
+  $a = "one" ascii
+  $b = "two" ascii
+  $c = "three" ascii
+  condition:
+  for any of ($a, $b, $c) : ( (@ > 100) )
+}

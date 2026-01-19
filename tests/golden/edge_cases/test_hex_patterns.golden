@@ -1,0 +1,22 @@
+rule hex_basic
+{
+  strings:
+  $a = { 01 02 03 04 }
+  condition:
+  $a
+}
+rule hex_longer
+{
+  strings:
+  $a = { de ad be ef ca fe ba be }
+  condition:
+  $a
+}
+rule multiple_hex
+{
+  strings:
+  $a = { 01 02 03 }
+  $b = { aa bb cc }
+  condition:
+  ($a or $b)
+}

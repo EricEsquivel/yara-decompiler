@@ -1,0 +1,84 @@
+rule percentage_quantifier_50
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  $c = "c" ascii
+  $d = "d" ascii
+  condition:
+  50% of ($a, $b, $c, $d)
+}
+rule percentage_quantifier_75
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  $c = "c" ascii
+  $d = "d" ascii
+  condition:
+  75% of ($a, $b, $c, $d)
+}
+rule percentage_quantifier_100
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  condition:
+  100% of ($a, $b)
+}
+rule none_of_quantifier
+{
+  strings:
+  $bad1 = "malicious" ascii
+  $bad2 = "evil" ascii
+  $good = "safe" ascii
+  condition:
+  ($good and none of ($bad1, $bad2))
+}
+rule specific_count_of
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  $c = "c" ascii
+  $d = "d" ascii
+  $e = "e" ascii
+  condition:
+  3 of ($a, $b, $c, $d, $e)
+}
+rule quantifier_with_wildcard
+{
+  strings:
+  $str_1 = "one" ascii
+  $str_2 = "two" ascii
+  $str_3 = "three" ascii
+  $other = "other" ascii
+  condition:
+  (2 of ($str_1, $str_2, $str_3) and $other)
+}
+rule all_of_subset
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  $c = "c" ascii
+  condition:
+  (all of ($a, $b) and $c)
+}
+rule any_of_in_range
+{
+  strings:
+  $a = "a" ascii
+  $b = "b" ascii
+  $c = "c" ascii
+  condition:
+  1 of ($a, $b, $c) in (0..1024)
+}
+rule quantifier_at_offset
+{
+  strings:
+  $a = "MZ" ascii
+  $b = "PE" ascii
+  condition:
+  ($a and $b)
+}

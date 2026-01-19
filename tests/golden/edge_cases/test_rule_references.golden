@@ -1,0 +1,14 @@
+rule base_rule_1
+{
+  strings:
+  $a = "base1" ascii
+  condition:
+  $a
+}
+rule base_rule_2
+{
+  strings:
+  $a = "base2" ascii
+  condition:
+  $a
+}

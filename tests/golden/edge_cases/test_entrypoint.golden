@@ -1,0 +1,7 @@
+rule entrypoint_basic
+{
+  strings:
+  $mz = "MZ" ascii
+  condition:
+  ($mz at 0 and (entrypoint > 0))
+}

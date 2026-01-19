@@ -223,3 +223,16 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "slow: marks tests as slow")
     config.addinivalue_line("markers", "semantic: marks semantic equivalence tests")
     config.addinivalue_line("markers", "golden: marks golden file comparison tests")
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    try:
+        parser.addoption(
+            "--generate-golden",
+            action="store_true",
+            default=False,
+            help="Generate golden files instead of comparing against them"
+        )
+    except ValueError:
+        # Option already added
+        pass

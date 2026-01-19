@@ -214,17 +214,3 @@ class TestConditionRegression:
             f"Full output:\n{result.output}\n"
             f"Extracted condition: {condition}"
         )
-
-
-def pytest_addoption(parser):
-    """Add custom command line options."""
-    try:
-        parser.addoption(
-            "--generate-golden",
-            action="store_true",
-            default=False,
-            help="Generate golden files instead of comparing against them"
-        )
-    except ValueError:
-        # Option already added
-        pass

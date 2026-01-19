@@ -1,0 +1,9 @@
+rule my_rule
+{
+  meta:
+  author = "test"
+  strings:
+  $a = "dummy" ascii
+  condition:
+  $a
+}

@@ -1,0 +1,66 @@
+rule regex_case_insensitive
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ nocase ascii
+  condition:
+  $a
+}
+rule regex_dot_matches_all
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ ascii
+  condition:
+  $a
+}
+rule regex_combined_flags
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ nocase ascii
+  condition:
+  $a
+}
+rule regex_character_classes
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ ascii
+  $b = /[RE_SOURCE_N_A]/ ascii
+  $c = /[RE_SOURCE_N_A]/ ascii
+  condition:
+  (($a or $b) or $c)
+}
+rule regex_quantifiers
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ ascii
+  $b = /[RE_SOURCE_N_A]/ ascii
+  $c = /[RE_SOURCE_N_A]/ ascii
+  $d = /[RE_SOURCE_N_A]/ ascii
+  $e = /[RE_SOURCE_N_A]/ ascii
+  $f = /[RE_SOURCE_N_A]/ ascii
+  condition:
+  ((((($a or $b) or $c) or $d) or $e) or $f)
+}
+rule regex_anchors
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ ascii
+  $b = /[RE_SOURCE_N_A]/ ascii
+  condition:
+  ($a or $b)
+}
+rule regex_groups
+{
+  strings:
+  $a = /[RE_SOURCE_N_A]/ ascii
+  $b = /[RE_SOURCE_N_A]/ ascii
+  condition:
+  ($a or $b)
+}
+rule regex_with_modifiers
+{
+  strings:
+  $a = /pattern/ nocase wide
+  $b = /another/ nocase ascii
+  condition:
+  ($a or $b)
+}
