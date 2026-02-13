@@ -1,6 +1,6 @@
 # YARA Decompiler
 
-A tool to decompile compiled YARA rules (`.yarc` files) back into human-readable YARA source. It is pinned to the version of YARA included in the `yara/` submodule (currently 4.5.x) but probably works with most YARA 4.x.
+A tool to decompile compiled YARA rules (`.yarc` files) back into human-readable YARA source. Compatible with YARA 4.1.0+.
 
 ## Build Instructions
 
