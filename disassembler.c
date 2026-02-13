@@ -49,7 +49,10 @@ const char* opcode_names[256] = {
     [OP_SWAPUNDEF] = "SWAPUNDEF",
     [OP_FILESIZE] = "FILESIZE",
     [OP_ENTRYPOINT] = "ENTRYPOINT",
+    // v4.1+
+#ifdef OP_UNUSED
     [OP_UNUSED] = "UNUSED",
+#endif
     [OP_MATCHES] = "MATCHES",
     [OP_IMPORT] = "IMPORT",
     [OP_LOOKUP_DICT] = "LOOKUP_DICT",
@@ -68,28 +71,75 @@ const char* opcode_names[256] = {
     [OP_ITER_START_DICT] = "ITER_START_DICT",
     [OP_ITER_START_INT_RANGE] = "ITER_START_INT_RANGE",
     [OP_ITER_START_INT_ENUM] = "ITER_START_INT_ENUM",
+    // v4.3+
+#ifdef OP_ITER_START_STRING_SET
     [OP_ITER_START_STRING_SET] = "ITER_START_STRING_SET",
+#endif
+#ifdef OP_ITER_CONDITION
     [OP_ITER_CONDITION] = "ITER_CONDITION",
+#endif
+#ifdef OP_ITER_END
     [OP_ITER_END] = "ITER_END",
+#endif
+    // v4.1+
+#ifdef OP_JZ
     [OP_JZ] = "JZ",
+#endif
+#ifdef OP_JZ_P
     [OP_JZ_P] = "JZ_P",
+#endif
+#ifdef OP_PUSH_8
     [OP_PUSH_8] = "PUSH_8",
+#endif
+#ifdef OP_PUSH_16
     [OP_PUSH_16] = "PUSH_16",
+#endif
+#ifdef OP_PUSH_32
     [OP_PUSH_32] = "PUSH_32",
+#endif
+#ifdef OP_PUSH_U
     [OP_PUSH_U] = "PUSH_U",
+#endif
     [OP_CONTAINS] = "CONTAINS",
+    // v4.1+
+#ifdef OP_STARTSWITH
     [OP_STARTSWITH] = "STARTSWITH",
+#endif
+#ifdef OP_ENDSWITH
     [OP_ENDSWITH] = "ENDSWITH",
+#endif
+#ifdef OP_ICONTAINS
     [OP_ICONTAINS] = "ICONTAINS",
+#endif
+#ifdef OP_ISTARTSWITH
     [OP_ISTARTSWITH] = "ISTARTSWITH",
+#endif
+#ifdef OP_IENDSWITH
     [OP_IENDSWITH] = "IENDSWITH",
+#endif
+    // v4.2+
+#ifdef OP_IEQUALS
     [OP_IEQUALS] = "IEQUALS",
+#endif
+#ifdef OP_OF_PERCENT
     [OP_OF_PERCENT] = "OF_PERCENT",
+#endif
+#ifdef OP_OF_FOUND_IN
     [OP_OF_FOUND_IN] = "OF_FOUND_IN",
+#endif
+#ifdef OP_COUNT_IN
     [OP_COUNT_IN] = "COUNT_IN",
+#endif
+#ifdef OP_DEFINED
     [OP_DEFINED] = "DEFINED",
+#endif
+    // v4.3+
+#ifdef OP_ITER_START_TEXT_STRING_SET
     [OP_ITER_START_TEXT_STRING_SET] = "ITER_START_TEXT_STRING_SET",
+#endif
+#ifdef OP_OF_FOUND_AT
     [OP_OF_FOUND_AT] = "OF_FOUND_AT",
+#endif
 
     [OP_INT_EQ] = "INT_EQ",
     [OP_INT_NEQ] = "INT_NEQ",
@@ -153,19 +203,27 @@ int get_instr_len(const uint8_t* ip)
         case OP_CALL:
         case OP_OBJ_LOAD:
         case OP_OBJ_FIELD:
+#ifdef OP_OF_PERCENT  // v4.2+: OP_OF gained an 8-byte operand in the same version
         case OP_OF:
         case OP_OF_PERCENT:
+#endif
         case OP_SWAPUNDEF:
             return 1 + 8;
-        
+
+#ifdef OP_PUSH_8  // v4.1+
         case OP_PUSH_8:
             return 1 + 1;
-        
+#endif
+
+#ifdef OP_PUSH_16  // v4.1+
         case OP_PUSH_16:
             return 1 + 2;
+#endif
 
+#ifdef OP_PUSH_32  // v4.1+
         case OP_PUSH_32:
             return 1 + 4;
+#endif
 
         case OP_JUNDEF_P:
         case OP_JNUNDEF:
@@ -175,8 +233,12 @@ int get_instr_len(const uint8_t* ip)
         case OP_JTRUE_P:
         case OP_JL_P:
         case OP_JLE_P:
+#ifdef OP_JZ  // v4.1+
         case OP_JZ:
+#endif
+#ifdef OP_JZ_P  // v4.1+
         case OP_JZ_P:
+#endif
             return 1 + 4;
 
         case OP_INIT_RULE:
@@ -231,17 +293,23 @@ void print_instruction(const uint8_t* ip)
             break;
         }
 
+#ifdef OP_PUSH_8  // v4.1+
         case OP_PUSH_8:
             printf(" %d", *(uint8_t*)(ip + 1));
             break;
-        
+#endif
+
+#ifdef OP_PUSH_16  // v4.1+
         case OP_PUSH_16:
             printf(" %d", *(uint16_t*)(ip + 1));
             break;
+#endif
 
+#ifdef OP_PUSH_32  // v4.1+
         case OP_PUSH_32:
             printf(" %d", *(uint32_t*)(ip + 1));
             break;
+#endif
 
         case OP_JUNDEF_P:
         case OP_JNUNDEF:
@@ -251,8 +319,12 @@ void print_instruction(const uint8_t* ip)
         case OP_JTRUE_P:
         case OP_JL_P:
         case OP_JLE_P:
+#ifdef OP_JZ  // v4.1+
         case OP_JZ:
+#endif
+#ifdef OP_JZ_P  // v4.1+
         case OP_JZ_P:
+#endif
             printf(" %d", *(int*)(ip + 1));
             break;
 
@@ -260,10 +332,12 @@ void print_instruction(const uint8_t* ip)
             printf(" jmp:%d idx:%d", *(int*)(ip + 1), *(uint32_t*)(ip + 5));
             break;
 
+#ifdef OP_OF_PERCENT  // v4.2+: OP_OF gained an 8-byte operand
         case OP_OF:
         case OP_OF_PERCENT:
             printf(" %s", *(uintptr_t*)(ip + 1) == 0 ? "STRING_SET" : "RULE_SET");
             break;
+#endif
     }
 }
 
