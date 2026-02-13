@@ -97,6 +97,9 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
     for(int i=0; i<16; i++) { current_range[i] = NULL; current_loop_cond[i] = NULL; loop_is_string_set[i] = 0; }
 
     int loop_depth = 0;
+#ifndef OP_ITER_START_STRING_SET
+    int string_set_var_frame = -1;  // memory frame for active string-set loop (pre-v4.3)
+#endif
 
     const uint8_t* curr_ip = rule_start + get_instr_len(rule_start);
     while(curr_ip < rule_end && *curr_ip != OP_HALT && *curr_ip != OP_MATCH_RULE)
@@ -138,9 +141,11 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 }
                 break;
             }
+#ifdef OP_PUSH_U  // v4.1+
             case OP_PUSH_U:
                 stack_push(&s, "SENTINEL_U");
                 break;
+#endif
             case OP_PUSH_RULE:
             {
                 // PUSH_RULE pushes the result of another rule (1 if matched, 0 if not)
@@ -155,14 +160,19 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 }
                 break;
             }
+#ifdef OP_PUSH_8  // v4.1+
             case OP_PUSH_8:
                 snprintf(buf, sizeof(buf), "%d", *(uint8_t*)(curr_ip + 1));
                 stack_push(&s, buf);
                 break;
+#endif
+#ifdef OP_PUSH_16  // v4.1+
             case OP_PUSH_16:
                 snprintf(buf, sizeof(buf), "%d", *(uint16_t*)(curr_ip + 1));
                 stack_push(&s, buf);
                 break;
+#endif
+#ifdef OP_PUSH_32  // v4.1+
             case OP_PUSH_32:
             {
                 unsigned int val = *(unsigned int*)(curr_ip + 1);
@@ -171,6 +181,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 stack_push(&s, buf);
                 break;
             }
+#endif
             case OP_POP:
                 free(stack_pop(&s));
                 break;
@@ -224,6 +235,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 free(v1);
                 break;
             }
+#ifdef OP_DEFINED  // v4.2+
             case OP_DEFINED:
             {
                 char* v1 = stack_pop(&s);
@@ -234,6 +246,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 free(v1);
                 break;
             }
+#endif
             case OP_BITWISE_AND:
             case OP_BITWISE_OR:
             case OP_BITWISE_XOR:
@@ -269,7 +282,9 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_INT_EQ:
             case OP_DBL_EQ:
             case OP_STR_EQ:
+#ifdef OP_IEQUALS  // v4.2+
             case OP_IEQUALS:
+#endif
             case OP_INT_NEQ:
             case OP_DBL_NEQ:
             case OP_STR_NEQ:
@@ -288,7 +303,45 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             {
                 char* v2 = stack_pop(&s);
                 char* v1 = stack_pop(&s);
-                const char* op = (opcode == OP_INT_EQ || opcode == OP_DBL_EQ || opcode == OP_STR_EQ || opcode == OP_IEQUALS) ? "==" :
+#ifndef OP_ITER_END  // pre-v4.3: detect end-of-loop comparison
+                if (loop_depth > 0 &&
+                    (strcmp(v1, "num_true") == 0 || strcmp(v2, "num_true") == 0) &&
+                    (opcode == OP_INT_GE || opcode == OP_INT_LE))
+                {
+                    // End-of-loop: num_true compared against quantifier
+                    const char* quant_str = (strcmp(v1, "num_true") == 0) ? v2 : v1;
+                    const char* q;
+                    if (strcmp(quant_str, "SENTINEL_U") == 0) q = "all";
+                    else if (strcmp(quant_str, "1") == 0) q = "any";
+                    else if (strcmp(quant_str, "0") == 0) q = "none";
+                    else q = quant_str;
+
+                    if (loop_is_string_set[loop_depth - 1]) {
+                        snprintf(buf, sizeof(buf), "for %s of %s : ( %s )",
+                                 q,
+                                 current_range[loop_depth-1] ? current_range[loop_depth-1] : "them",
+                                 current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "true");
+                    } else {
+                        char var_name = 'i' + loop_depth - 1;
+                        snprintf(buf, sizeof(buf), "for %s %c in %s : ( %s )",
+                                 q, var_name,
+                                 current_range[loop_depth-1] ? current_range[loop_depth-1] : "RANGE",
+                                 current_loop_cond[loop_depth-1] ? current_loop_cond[loop_depth-1] : "CONDITION");
+                    }
+                    stack_push(&s, buf);
+                    loop_depth--;
+#ifndef OP_ITER_START_STRING_SET
+                    string_set_var_frame = -1;
+#endif
+                    free(v1); free(v2);
+                    break;
+                }
+#endif
+                const char* op = (opcode == OP_INT_EQ || opcode == OP_DBL_EQ || opcode == OP_STR_EQ
+#ifdef OP_IEQUALS  // v4.2+
+                                 || opcode == OP_IEQUALS
+#endif
+                                 ) ? "==" :
                                  (opcode == OP_INT_NEQ || opcode == OP_DBL_NEQ || opcode == OP_STR_NEQ) ? "!=" :
                                  (opcode == OP_INT_LT || opcode == OP_DBL_LT || opcode == OP_STR_LT) ? "<" :
                                  (opcode == OP_INT_GT || opcode == OP_DBL_GT || opcode == OP_STR_GT) ? ">" :
@@ -425,15 +478,21 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 break;
             }
             case OP_OF:
+#ifdef OP_OF_FOUND_IN  // v4.2+
             case OP_OF_FOUND_IN:
+#endif
+#ifdef OP_OF_PERCENT  // v4.2+
             case OP_OF_PERCENT:
+#endif
             {
                 char* range_end = NULL;
                 char* range_start = NULL;
+#ifdef OP_OF_FOUND_IN  // v4.2+
                 if (opcode == OP_OF_FOUND_IN) {
                     range_end = stack_pop(&s);
                     range_start = stack_pop(&s);
                 }
+#endif
 
                 char* set_items[128];
                 int set_count = 0;
@@ -451,9 +510,12 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
 
                 // Format quantifier with % for percentage-based matching
                 char quant_buf[64];
+#ifdef OP_OF_PERCENT  // v4.2+
                 if (opcode == OP_OF_PERCENT) {
                     snprintf(quant_buf, sizeof(quant_buf), "%s%%", quantifier);
-                } else {
+                } else
+#endif
+                {
                     snprintf(quant_buf, sizeof(quant_buf), "%s", quantifier);
                 }
 
@@ -470,12 +532,14 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     strcat(buf, ")");
                 }
 
+#ifdef OP_OF_FOUND_IN  // v4.2+
                 if (opcode == OP_OF_FOUND_IN) {
                     char temp[16384];
                     snprintf(temp, sizeof(temp), "%s in (%s..%s)", buf, range_start, range_end);
                     strcpy(buf, temp);
                     free(range_start); free(range_end);
                 }
+#endif
 
                 stack_push(&s, buf);
                 free(quantifier);
@@ -484,6 +548,16 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
             case OP_PUSH_M:
             {
                 uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
+#ifndef OP_ITER_START_STRING_SET
+                if (string_set_var_frame >= 0 && addr == (uintptr_t)string_set_var_frame) {
+                    stack_push(&s, "#");  // current string placeholder
+                    break;
+                }
+                if (string_set_var_frame >= 0 && addr == (uintptr_t)(string_set_var_frame + 1)) {
+                    stack_push(&s, "num_true");
+                    break;
+                }
+#endif
                 if (addr % 4 == 0) stack_push(&s, "num_true");
                 else if (addr % 4 == 3) {
                     // Check if we have a stored value first (for string set iterations)
@@ -510,9 +584,73 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                     if (mem_slots[addr]) free(mem_slots[addr]);
                     mem_slots[addr] = strdup(val);
                 }
+#ifndef OP_ITER_START_STRING_SET
+                // Detect string-set loop start: POP_M pops a "$..." value
+                // and the stack has more "$..." values followed by SENTINEL_U
+                if (val[0] == '$' && s.top >= 2) {
+                    // Peek to see if there are more strings and a sentinel below
+                    int has_sentinel = 0;
+                    int string_count = 0;
+                    for (int i = s.top - 1; i >= 0; i--) {
+                        if (s.items[i][0] == '$') {
+                            string_count++;
+                        } else if (strcmp(s.items[i], "SENTINEL_U") == 0) {
+                            has_sentinel = 1;
+                            break;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (has_sentinel && string_count > 0) {
+                        // Collect all string names from the stack
+                        char* set_items[128];
+                        int set_count = 0;
+                        set_items[set_count++] = strdup(val);  // the already-popped string
+                        char* item = stack_pop(&s);
+                        while (item[0] == '$' && set_count < 128) {
+                            set_items[set_count++] = item;
+                            item = stack_pop(&s);
+                        }
+                        // item should be SENTINEL_U now — discard it
+                        free(item);
+
+                        // Build string set: "($a, $b, $c)"
+                        snprintf(buf, sizeof(buf), "(");
+                        for (int i = set_count - 1; i >= 0; i--) {
+                            strcat(buf, set_items[i]);
+                            if (i > 0) strcat(buf, ", ");
+                            free(set_items[i]);
+                        }
+                        strcat(buf, ")");
+
+                        if (current_range[loop_depth]) free(current_range[loop_depth]);
+                        current_range[loop_depth] = strdup(buf);
+                        loop_is_string_set[loop_depth] = 1;
+                        string_set_var_frame = (int)addr;
+                        // Push sentinel back so the post-loop POP consumes it
+                        // instead of eating the quantifier
+                        stack_push(&s, "SENTINEL_U");
+                        loop_depth++;
+                    }
+                }
+#endif
                 free(val);
                 break;
             }
+#ifndef OP_ITER_CONDITION  // pre-v4.3: ADD_M captures loop condition
+            case OP_ADD_M:
+            {
+                uintptr_t addr = *(uintptr_t*)(curr_ip + 1);
+                char* val = stack_pop(&s);
+                if (loop_depth > 0 && (addr % 4 == 0 || (string_set_var_frame >= 0 && addr == (uintptr_t)(string_set_var_frame + 1)))) {
+                    // num_true counter slot — the popped value is the loop condition
+                    if (current_loop_cond[loop_depth-1]) free(current_loop_cond[loop_depth-1]);
+                    current_loop_cond[loop_depth-1] = strdup(val);
+                }
+                free(val);
+                break;
+            }
+#endif
             case OP_ITER_START_INT_RANGE:
             {
                 char* end = stack_pop(&s);
@@ -527,8 +665,13 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 loop_depth++;
                 break;
             }
+#ifdef OP_ITER_START_STRING_SET  // v4.3+
             case OP_ITER_START_STRING_SET:
+#endif
+#ifdef OP_ITER_START_TEXT_STRING_SET  // v4.3+
             case OP_ITER_START_TEXT_STRING_SET:
+#endif
+#if defined(OP_ITER_START_STRING_SET) || defined(OP_ITER_START_TEXT_STRING_SET)
             {
                 // Pop count from stack
                 char* count_str = stack_pop(&s);
@@ -564,6 +707,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 loop_depth++;
                 break;
             }
+#endif
             case OP_ITER_NEXT:
             {
                 // Pop iterator, push it back, then push has_more, then current item
@@ -587,6 +731,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 }
                 break;
             }
+#ifdef OP_ITER_CONDITION  // v4.3+
             case OP_ITER_CONDITION:
             {
                 char* _quant = stack_pop(&s);
@@ -600,6 +745,8 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 free(_quant); free(_num_true); free(_cond);
                 break;
             }
+#endif
+#ifdef OP_ITER_END  // v4.3+
             case OP_ITER_END:
             {
                 char* _cond = stack_pop(&s);
@@ -627,6 +774,7 @@ void decompile_rule_condition(const uint8_t* code_start, int rule_idx)
                 loop_depth--;
                 break;
             }
+#endif
             case OP_JFALSE:
             case OP_JTRUE:
                 break;
