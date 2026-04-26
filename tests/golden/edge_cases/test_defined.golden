@@ -1,5 +1,0 @@
-rule defined_operator
-{
-  condition:
-  defined entrypoint
-}

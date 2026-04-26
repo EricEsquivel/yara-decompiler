@@ -1,8 +1,0 @@
-rule short_circuit
-{
-  strings:
-  $a = "a" ascii
-  $b = "b" ascii
-  condition:
-  (($a and $b) or not $a)
-}

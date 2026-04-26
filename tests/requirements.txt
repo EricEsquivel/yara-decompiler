@@ -1,3 +1,0 @@
-# Test dependencies for YARA decompiler
-pytest>=7.0.0
-pytest-xdist  # Optional: parallel test execution with -n auto
